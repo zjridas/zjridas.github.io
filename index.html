@@ -182,7 +182,8 @@ table.bd tr.sel td{font-weight:700}
   <h2>Connect this phone</h2>
   <div class="panel">
     <p style="margin:0;font-size:14px;color:var(--muted)">Enter your private key. You only need to do this once on each phone.</p>
-    <label class="f"><span>Private key</span><input id="keyIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" enterkeyhint="go"></label>
+    <label class="f"><span>Private key</span><input id="keyIn" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Your private key" enterkeyhint="go"></label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:var(--muted)"><input type="checkbox" id="keyShow" style="width:auto"> Show key</label>
     <div class="hint" id="keyMsg" style="color:var(--out)"></div>
     <button class="btn" id="keyBtn" type="button">Connect</button>
   </div>
@@ -449,6 +450,7 @@ async function load(quiet){
     mode="db"; setSync("Synced"); setBanner(""); fillSettings(); renderAll();
     if(!editingId) setCat(cat,true);
   }catch(err){
+    if(/LOCKED/.test(err.message)){ return showSetup("Too many wrong tries. Please wait 15 minutes and try again."); }
     if(/BAD_KEY/.test(err.message)){ try{localStorage.removeItem("zj_key")}catch(e){} KEY=""; return showSetup("This phone's key is no longer accepted. Please enter the key again."); }
     if(quiet) return;
     mode="error"; setSync("Not connected",true);
@@ -748,14 +750,30 @@ async function sendBill(id){
   const e=entries.find(x=>x.id===id); const i=e&&invoiceMap()[e.code||e.id]; if(!i) return;
   billLinks[id]={busy:true}; renderList();
   try{
-    const url=await guarded(()=>call("createBill",id,billHtml(i),`${i.code}_${(e.party||"").replace(/[^\w-]+/g,"_")}.pdf`));
-    e.pdf=url; billLinks[id]={url}; renderList();
+    const name=`ZJ-Ridas-Bill-${i.code}.pdf`;
+    const r=await guarded(()=>call("createBillFile",id,billHtml(i),name));
+    e.pdf=r.url;
+    let file=null;
+    try{
+      const bin=atob(r.b64), arr=new Uint8Array(bin.length);
+      for(let k=0;k<bin.length;k++) arr[k]=bin.charCodeAt(k);
+      const f=new File([arr],name,{type:"application/pdf"});
+      if(navigator.canShare&&navigator.canShare({files:[f]})) file=f;
+    }catch(x){ file=null; }
+    billLinks[id]={url:r.url,file}; renderList();
   }catch(err){ delete billLinks[id]; renderList(); toast("Couldn't create the bill – try again"); }
 }
-function waLink(e,url){
+function billText(e){
   const i=invoiceMap()[e.code||e.id], C=eCur(e);
-  const t=`Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}\n\nView your bill: ${url}`;
-  return "https:\/\/wa.me/"+e.mobile+"?text="+encodeURIComponent(t);
+  return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}`;
+}
+function waLink(e,url){
+  return "https:\/\/wa.me/"+e.mobile+"?text="+encodeURIComponent(billText(e)+"\n\nView your bill: "+url);
+}
+async function shareBill(id){
+  const e=entries.find(x=>x.id===id), bl=billLinks[id]; if(!e||!bl||!bl.file) return;
+  try{ await navigator.share({files:[bl.file],text:billText(e)}); }
+  catch(err){ if(!err||err.name!=="AbortError") toast("Couldn't open sharing – use the link option instead"); }
 }
 
 /* ---------- entries list ---------- */
@@ -776,8 +794,11 @@ function entryCard(e,inv){
   const bl=billLinks[e.id];
   let box="";
   if(bl&&bl.busy) box=`<div class="billbox">Creating the bill…</div>`;
-  else if(bl&&bl.url) box=`<div class="billbox">Bill ready. <a href="${esc(bl.url)}" target="_blank" rel="noopener">View PDF</a>
-      ${e.mobile?`<a class="btn wa" href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send on WhatsApp</a>`:`<div class="hint">Add a mobile number to this bill to send it on WhatsApp.</div>`}</div>`;
+  else if(bl&&bl.url) box=`<div class="billbox">Bill ready.
+      ${bl.file?`<button type="button" class="btn wa" data-act="share" data-id="${esc(e.id)}">Share PDF on WhatsApp</button>`
+        :e.mobile?`<a class="btn wa" href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send on WhatsApp</a>`
+        :`<div class="hint">Add a mobile number to this bill to send it on WhatsApp.</div>`}
+      <div style="margin-top:8px"><a href="${esc(bl.url)}" target="_blank" rel="noopener">View PDF</a>${bl.file&&e.mobile?` · <a href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send as a link instead</a>`:""}</div></div>`;
   return `<div class="entry">${e.code?`<div class="code">${esc(e.code)}</div>`:""}<div class="top"><div><div class="who">${esc(who)}${badge}</div><div class="what">${esc(bits)}</div></div>
     <div><div class="amt ${e.dir}">${sign}${amtTxt}</div>${sub}</div></div>
     <div class="acts">${e.photo?`<a class="mini" href="${esc(e.photo)}" target="_blank" rel="noopener">Bill photo</a>`:""}
@@ -813,6 +834,7 @@ $("list").addEventListener("click",async ev=>{
   const id=b.dataset.id;
   if(b.dataset.act==="edit") return editEntry(id);
   if(b.dataset.act==="bill") return sendBill(id);
+  if(b.dataset.act==="share") return shareBill(id);
   if(armedRow!==id){
     document.querySelectorAll(".mini.del.armed").forEach(x=>{x.classList.remove("armed");x.textContent="Delete"});
     armedRow=id; b.classList.add("armed"); b.textContent="Tap to confirm";
@@ -987,13 +1009,14 @@ function buildReports(){
 
 $("keyBtn").onclick=async()=>{
   blurAll();
-  const k=$("keyIn").value.trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
-  if(k.length!==12){ $("keyMsg").textContent="The key has 12 letters and numbers, like ABCD-EFGH-JKLM."; return; }
+  const k=$("keyIn").value.trim();
+  if(k.length<6){ $("keyMsg").textContent="Please enter your full private key."; return; }
   KEY=k; $("keyBtn").disabled=true; $("keyBtn").textContent="Connecting…"; $("keyMsg").textContent="";
   try{ await call("getAll"); try{localStorage.setItem("zj_key",KEY)}catch(e){} hideSetup(); await load(); $("keyIn").value=""; toast("Connected"); }
-  catch(err){ KEY=""; $("keyMsg").textContent=/BAD_KEY/.test(err.message)?"That key wasn't accepted. Please check it and try again.":"Couldn't connect. Check your internet and try again."; }
+  catch(err){ KEY=""; $("keyMsg").textContent=/BAD_KEY/.test(err.message)?"That key wasn't accepted. Check capital letters and symbols, then try again.":/LOCKED/.test(err.message)?"Too many wrong tries. Please wait 15 minutes and try again.":"Couldn't connect. Check your internet and try again."; }
   $("keyBtn").disabled=false; $("keyBtn").textContent="Connect";
 };
+$("keyShow").onchange=()=>{ $("keyIn").type=$("keyShow").checked?"text":"password"; };
 $("logoutBtn").onclick=()=>{ try{localStorage.removeItem("zj_key")}catch(e){} KEY=""; entries=[]; renderAll(); showSetup(); };
 document.addEventListener("keydown",ev=>{
   const t=ev.target;
