@@ -206,6 +206,8 @@ table.bd tr.sel td{font-weight:700}
     </div>
 
     <div id="mobileRow" class="hidden">
+      <label class="f"><span>Firm / company name</span><input id="firm" enterkeyhint="done" autocomplete="off" placeholder="Optional"></label>
+      <label class="f"><span>Address</span><textarea id="address" rows="3" placeholder="Optional – building, area, city, country" style="min-height:84px"></textarea></label>
       <span class="flabel">Mobile number (for sending the bill)</span>
       <div class="phone-row">
         <select id="mcc"><option value="971">+971</option><option value="91">+91</option></select>
@@ -568,6 +570,7 @@ function onParty(){
   if(last){
     if(c.loc&&last.country) setCountry(last.country,last.city);
     if(cat==="sale"&&last.mobile) fillMobile(last.mobile);
+    if(cat==="sale"){ if(last.firm&&!$("firm").value) $("firm").value=last.firm; if(last.address&&!$("address").value) $("address").value=last.address; }
   }
   if(cat==="custpay") fillInvoices();
 }
@@ -595,7 +598,7 @@ function onInv(setAmount){
 $("inv").addEventListener("change",()=>onInv(true));
 
 function resetForm(keepCat){
-  ["amount","party","qty","ref","note","sbill","mobile","cityOther"].forEach(i=>$(i).value=""); $("note").style.height="";
+  ["amount","party","qty","ref","note","sbill","mobile","cityOther","firm","address"].forEach(i=>$(i).value=""); $("note").style.height="";
   $("photo").value=""; $("photoHint").innerHTML="Optional. Take a photo or pick one from your gallery. It's saved in your Google Drive.";
   $("itemLines").innerHTML=""; $("mcc").value="971"; $("mobHint").textContent="";
   $("unit").value=""; $("date").value=today(); $("cur").value="AED";
@@ -618,6 +621,7 @@ function editEntry(id){
   if(e.cat==="custpay") fillInvoices(e.inv||"");
   $("cur").value=eCur(e); $("amount").value=r2(eAmt(e));
   if(e.mobile) fillMobile(e.mobile);
+  $("firm").value=e.firm||""; $("address").value=e.address||"";
   setCountry(e.country||"UAE",e.city);
   $("qty").value=e.qty??""; $("unit").value=e.unit||""; $("sbill").value=e.sbill||"";
   if(e.photo) $("photoHint").innerHTML=`Current: <a href="${esc(e.photo)}" target="_blank" rel="noopener">view bill photo</a>. Choose a file only to replace it.`;
@@ -668,6 +672,7 @@ $("saveBtn").onclick=async()=>{
     country:c.loc?country:(invE?.country||"UAE"), city:c.loc?cityVal():(invE?.city||""),
     sbill:c.sb?$("sbill").value.trim():"", photo:c.sb?(prev?.photo||""):"",
     mobile:cat==="sale"?readMobile():"",
+    firm:cat==="sale"?$("firm").value.trim():"", address:cat==="sale"?$("address").value.trim():"",
     items:cat==="sale"?JSON.stringify(its):"", inv:cat==="custpay"?$("inv").value:"", pdf:prev?.pdf||""
   };
   if(cat==="sale") e.bill=r2(bill);
@@ -732,38 +737,49 @@ const openInvoices=()=>Object.values(invoiceMap()).filter(i=>i.due>0.009).sort((
 const months=()=>[...new Set(entries.map(e=>e.date.slice(0,7)))].sort().reverse();
 
 /* ---------- bill (PDF) ---------- */
+const SITE_URL="https:\/\/zj-ridas.vercel.app\/", SITE_TXT="zj-ridas.vercel.app", IG_URL="https:\/\/www.instagram.com\/zj.ridas\/";
 function billHtml(i){
   const e=i.e, C=eCur(e), its=items(e).length?items(e):[{d:"Order",q:1,p:eBill(e)}];
   const money=n=>fmt(n,C).replace("₹","Rs.");
-  const rows=its.map((t,n)=>`<tr><td style="padding:8px;border-bottom:1px solid #F3D9E3">${n+1}</td><td style="padding:8px;border-bottom:1px solid #F3D9E3">${esc(t.d)}</td><td style="padding:8px;border-bottom:1px solid #F3D9E3;text-align:center">${t.q}</td><td style="padding:8px;border-bottom:1px solid #F3D9E3;text-align:right">${money(t.p)}</td><td style="padding:8px;border-bottom:1px solid #F3D9E3;text-align:right">${money(t.q*t.p)}</td></tr>`).join("");
-  const pays=[{date:e.date,a:eAmt(e)},...i.pays.map(p=>({date:p.date,a:conv(eAmt(p),eCur(p),C)}))].filter(p=>p.a>0);
-  const payRows=pays.map(p=>`<tr><td style="padding:4px 8px;color:#6B5A4E">${niceDate(p.date)}</td><td style="padding:4px 8px;text-align:right;color:#6B5A4E">${money(p.a)}</td></tr>`).join("");
+  const lnk=(u,t,c)=>`<a href="${u}" style="color:${c||"#D9668F"};text-decoration:none;font-weight:bold">${t}</a>`;
+  const td="padding:8px;border-bottom:1px solid #F3D9E3";
+  const rows=its.map((t,n)=>`<tr><td style="${td}">${n+1}</td><td style="${td}">${esc(t.d)}</td><td style="${td};text-align:center">${t.q}</td><td style="${td};text-align:right">${money(t.p)}</td><td style="${td};text-align:right">${money(t.q*t.p)}</td></tr>`).join("");
+  const pays=[{date:e.date,a:eAmt(e)},...i.pays.map(p=>({date:p.date,a:conv(eAmt(p),eCur(p),C)}))].filter(p=>p.a>0).sort((a,b)=>a.date.localeCompare(b.date));
+  const payRows=pays.map(p=>`<tr><td style="padding:5px 8px;color:#4A3B33">${niceDate(p.date)}</td><td style="padding:5px 8px;text-align:right;color:#4A3B33">${money(p.a)}</td></tr>`).join("");
   const st=i.status, stc=st==="Paid"?"#2E7A57":st==="Part paid"?"#9A6A00":"#B0433C";
-  return `<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;color:#4A3B33;margin:28px;font-size:13px">
-  <table style="width:100%;border-collapse:collapse"><tr>
+  const addr=String(e.address||"").trim();
+  return `<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;color:#4A3B33;margin:28px;font-size:14px">
+  <table style="width:100%;border-collapse:collapse;font-size:14px"><tr>
     <td style="width:110px;vertical-align:top"><img src="${LOGO}" style="width:100px;height:100px"></td>
     <td style="vertical-align:top;padding-left:10px"><div style="font-size:24px;color:#E8799F;font-weight:bold;letter-spacing:1px">ZJ Ridas</div>
-      <div style="color:#6B5A4E;margin-top:4px">Instagram: @zj.ridas</div></td>
+      <div style="color:#6B5A4E;margin-top:6px">Instagram: ${lnk(IG_URL,"@zj.ridas")}</div>
+      <div style="color:#6B5A4E;margin-top:3px">Website: ${lnk(SITE_URL,SITE_TXT)}</div></td>
     <td style="vertical-align:top;text-align:right"><div style="font-size:22px;letter-spacing:3px;color:#5FB7AE;font-weight:bold">INVOICE</div>
       <div style="margin-top:6px"><b>No:</b> ${esc(i.code)}</div><div><b>Date:</b> ${niceDate(e.date)}</div>
       <div style="margin-top:6px;color:${stc};font-weight:bold">${st.toUpperCase()}</div></td>
   </tr></table>
-  <div style="height:3px;background:#F7B6CB;margin:16px 0 14px"></div>
+  <div style="border-top:3px solid #F7B6CB;margin:16px 0 14px;height:0"></div>
   <div style="color:#8C7A6E;font-size:11px;letter-spacing:1px">BILL TO</div>
-  <div style="font-size:15px;font-weight:bold;margin-top:2px">${esc(e.party)}</div>
-  ${e.mobile?`<div style="color:#6B5A4E">${esc(fmtMobile(e.mobile))}</div>`:""}
-  <table style="width:100%;border-collapse:collapse;margin-top:16px">
-    <tr style="background:#FDE7EF"><th style="padding:8px;text-align:left;width:30px">#</th><th style="padding:8px;text-align:left">Item</th><th style="padding:8px;text-align:center;width:50px">Qty</th><th style="padding:8px;text-align:right;width:110px">Price</th><th style="padding:8px;text-align:right;width:120px">Amount</th></tr>
+  <div style="font-size:16px;font-weight:bold;margin-top:2px">${esc(e.party)}</div>
+  ${e.firm?`<div style="font-weight:bold;color:#4A3B33;font-size:14px">${esc(e.firm)}</div>`:""}
+  ${addr?`<div style="color:#6B5A4E;font-size:14px">${esc(addr).replace(/\n/g,"<br>")}</div>`:""}
+  ${e.mobile?`<div style="color:#6B5A4E;font-size:14px">${esc(fmtMobile(e.mobile))}</div>`:""}
+  <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
+    <tr style="background:#FDE7EF"><th style="padding:8px;text-align:left;width:30px;border-bottom:2px solid #F7B6CB;color:#C2557D">#</th><th style="padding:8px;text-align:left;border-bottom:2px solid #F7B6CB;color:#C2557D">Item</th><th style="padding:8px;text-align:center;width:50px;border-bottom:2px solid #F7B6CB;color:#C2557D">Qty</th><th style="padding:8px;text-align:right;width:110px;border-bottom:2px solid #F7B6CB;color:#C2557D">Price</th><th style="padding:8px;text-align:right;width:120px;border-bottom:2px solid #F7B6CB;color:#C2557D">Amount</th></tr>
     ${rows}
   </table>
-  <table style="width:300px;margin-left:auto;margin-top:12px;border-collapse:collapse">
+  <table style="width:300px;margin-left:auto;margin-top:12px;border-collapse:collapse;font-size:14px">
     <tr><td style="padding:6px 8px">Total</td><td style="padding:6px 8px;text-align:right;font-weight:bold">${money(i.bill)}</td></tr>
     <tr><td style="padding:6px 8px">Paid</td><td style="padding:6px 8px;text-align:right">${money(i.paid)}</td></tr>
-    <tr style="background:#E3F5F3"><td style="padding:8px;font-weight:bold">Balance due</td><td style="padding:8px;text-align:right;font-weight:bold;font-size:15px">${money(Math.max(0,i.due))}</td></tr>
+    <tr style="background:#E3F5F3"><td style="padding:8px;font-weight:bold;border-top:2px solid #8ED3CC;border-bottom:2px solid #8ED3CC;color:#2F7F77">Balance due</td><td style="padding:8px;text-align:right;font-weight:bold;font-size:15px;border-top:2px solid #8ED3CC;border-bottom:2px solid #8ED3CC;color:#2F7F77">${money(Math.max(0,i.due))}</td></tr>
   </table>
-  ${payRows?`<div style="margin-top:14px;color:#8C7A6E;font-size:11px;letter-spacing:1px">PAYMENTS RECEIVED</div><table style="width:300px;border-collapse:collapse">${payRows}</table>`:""}
-  <div style="margin-top:40px;text-align:center;color:#E8799F;font-size:15px">Thank you for your order</div>
-  <div style="text-align:center;color:#8C7A6E;margin-top:4px">ZJ Ridas · @zj.ridas</div>
+  ${payRows?`<table style="width:300px;margin-left:auto;margin-top:16px;border-collapse:collapse;font-size:13px">
+    <tr><td colspan="2" style="padding:0 8px 5px;color:#8C7A6E;font-size:11px;letter-spacing:1px;border-bottom:1px solid #F3D9E3">PAYMENTS RECEIVED</td></tr>
+    ${payRows}
+  </table>`:""}
+  <div style="margin-top:40px;text-align:center;color:#E8799F;font-size:20px;font-weight:bold">Thank you for your order</div>
+  <div style="text-align:center;color:#4A3B33;font-size:14px;margin-top:8px">Know more about ZJ Ridas: ${lnk(SITE_URL,SITE_TXT)}</div>
+  <div style="text-align:center;color:#4A3B33;font-size:14px;margin-top:4px">Instagram: ${lnk(IG_URL,"@zj.ridas")}</div>
   </body></html>`;
 }
 async function sendBill(id){
@@ -785,7 +801,7 @@ async function sendBill(id){
 }
 function billText(e){
   const i=invoiceMap()[e.code||e.id], C=eCur(e);
-  return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}`;
+  return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}\n\nKnow more about ZJ Ridas: ${SITE_TXT}`;
 }
 function waLink(e,url){
   return "https:\/\/wa.me/"+normMobile(e.mobile)+"?text="+encodeURIComponent(billText(e)+(url?"\n\nView your bill: "+url:""));
@@ -1007,8 +1023,8 @@ function buildReports(){
   out["By period"]=BP;
 
   const im=invoiceMap();
-  out["Invoices"]=[["Invoice no","Date","Customer","Mobile","City","Items","Currency","Total","Paid","Balance due","Status","Invoice PDF"],
-    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.mobile?"'"+fmtMobile(i.e.mobile):"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
+  out["Invoices"]=[["Invoice no","Date","Customer","Firm","Address","Mobile","City","Items","Currency","Total","Paid","Balance due","Status","Invoice PDF"],
+    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.firm||"",i.e.address||"",i.e.mobile?"'"+fmtMobile(i.e.mobile):"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
   out["Customer payments"]=[H.concat(["For invoice"]),...sorted.filter(e=>e.cat==="sale"||e.cat==="custpay").map(e=>row(e).concat([e.cat==="custpay"?e.inv||"":e.code||""]))];
   out["Suppliers"]=[H,...sorted.filter(e=>e.cat==="fabric"||e.cat==="lace").map(row)];
   out["Tailors"]=[H,...sorted.filter(e=>e.cat==="tailor").map(row)];
