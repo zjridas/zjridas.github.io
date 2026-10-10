@@ -73,6 +73,7 @@ label.f > span{display:block;margin-bottom:5px}
 input,select,textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px;font-size:16px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--plum);box-shadow:0 0 0 3px var(--plum-soft)}
 input[type=file]{padding:10px;font-size:14px}
+textarea{min-height:104px;resize:vertical;line-height:1.45}
 .amount-row{display:grid;grid-template-columns:1fr 92px;gap:8px}
 .amount-row input{font-size:24px;font-weight:700;padding:12px 14px}
 .phone-row{display:grid;grid-template-columns:100px 1fr;gap:8px}
@@ -210,6 +211,7 @@ table.bd tr.sel td{font-weight:700}
         <select id="mcc"><option value="971">+971</option><option value="91">+91</option></select>
         <input id="mobile" enterkeyhint="done" type="tel" inputmode="tel" placeholder="Optional" autocomplete="off">
       </div>
+      <div class="hint" id="mobHint"></div>
     </div>
 
     <div id="invRow" class="hidden">
@@ -262,7 +264,7 @@ table.bd tr.sel td{font-weight:700}
     </div>
 
     <label class="f"><span>Batch / order ref</span><input id="ref" enterkeyhint="done" list="refList" autocomplete="off" placeholder="Optional, e.g. B07"><datalist id="refList"></datalist></label>
-    <label class="f"><span>Note</span><textarea id="note" rows="2" placeholder="Optional"></textarea></label>
+    <label class="f"><span>Note</span><textarea id="note" rows="4" placeholder="Optional"></textarea></label>
 
     <button class="btn" id="saveBtn" type="button">Save entry</button>
     <button class="btn danger hidden" id="delBtn" type="button">Delete this entry</button>
@@ -490,8 +492,23 @@ function buildChips(){
 }
 document.addEventListener("click",ev=>{const b=ev.target.closest(".chip");if(b)setCat(b.dataset.c)});
 
+function normMobile(raw){
+  let d=String(raw||"").replace(/\D/g,"");
+  if(d.startsWith("971")){ const r=d.slice(3).replace(/^0+/,""); return /^[6-9]\d{9}$/.test(r)?"91"+r:"971"+r; }
+  if(d.startsWith("91")){ const r=d.slice(2).replace(/^0+/,""); return /^5\d{8}$/.test(r)?"971"+r:"91"+r; }
+  return d;
+}
+function readMobile(){
+  const raw=$("mobile").value.trim(); if(!raw.replace(/\D/g,"")) return "";
+  if(/^(\+|00)/.test(raw)) return normMobile(raw.replace(/^00/,""));
+  return normMobile($("mcc").value+raw.replace(/\D/g,"").replace(/^0+/,""));
+}
+function fmtMobile(m){ m=normMobile(m); if(!m) return ""; const cc=m.startsWith("971")?"971":m.startsWith("91")?"91":""; return "+"+cc+" "+m.slice(cc.length); }
+function fillMobile(m){ m=normMobile(m); const cc=m.startsWith("971")?"971":"91"; $("mcc").value=cc; $("mobile").value=m.slice(cc.length); mobileHint(); }
+function mobileHint(){ const m=readMobile(); $("mobHint").textContent=m?"Bill will go to "+fmtMobile(m):""; }
 function setCountry(k,city){
   country=k==="India"?"India":"UAE";
+  if(cat==="sale"&&!$("mobile").value.trim()) $("mcc").value=country==="India"?"91":"971";
   document.querySelectorAll("#countrySeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.k===country));
   const list=CITIES[country];
   $("city").innerHTML=list.map(c=>`<option>${c}</option>`).join("");
@@ -550,10 +567,13 @@ function onParty(){
   const last=lastFor($("party").value,c.party);
   if(last){
     if(c.loc&&last.country) setCountry(last.country,last.city);
-    if(cat==="sale"&&last.mobile){const m=String(last.mobile);const cc=m.startsWith("91")&&!m.startsWith("971")?"91":"971";$("mcc").value=cc;$("mobile").value=m.slice(cc.length)}
+    if(cat==="sale"&&last.mobile) fillMobile(last.mobile);
   }
   if(cat==="custpay") fillInvoices();
 }
+function growNote(){const t=$("note");t.style.height="auto";t.style.height=Math.max(104,t.scrollHeight+2)+"px"}
+$("note").addEventListener("input",growNote);
+$("mobile").addEventListener("input",mobileHint); $("mcc").addEventListener("change",mobileHint);
 $("party").addEventListener("change",onParty); $("party").addEventListener("blur",onParty);
 
 function fillInvoices(keep){
@@ -575,9 +595,9 @@ function onInv(setAmount){
 $("inv").addEventListener("change",()=>onInv(true));
 
 function resetForm(keepCat){
-  ["amount","party","qty","ref","note","sbill","mobile","cityOther"].forEach(i=>$(i).value="");
+  ["amount","party","qty","ref","note","sbill","mobile","cityOther"].forEach(i=>$(i).value=""); $("note").style.height="";
   $("photo").value=""; $("photoHint").innerHTML="Optional. Take a photo or pick one from your gallery. It's saved in your Google Drive.";
-  $("itemLines").innerHTML=""; $("mcc").value="971";
+  $("itemLines").innerHTML=""; $("mcc").value="971"; $("mobHint").textContent="";
   $("unit").value=""; $("date").value=today(); $("cur").value="AED";
   editingId=null; delArmed=false;
   $("formTitle").textContent="New entry"; $("saveBtn").textContent="Save entry";
@@ -597,12 +617,12 @@ function editEntry(id){
   if(e.cat==="sale"){ $("itemLines").innerHTML=""; const its=items(e); if(its.length) its.forEach(addLine); else addLine({d:"Order",q:1,p:eBill(e)}); }
   if(e.cat==="custpay") fillInvoices(e.inv||"");
   $("cur").value=eCur(e); $("amount").value=r2(eAmt(e));
-  if(e.mobile){const m=String(e.mobile);const cc=m.startsWith("91")&&!m.startsWith("971")?"91":"971";$("mcc").value=cc;$("mobile").value=m.slice(cc.length)}
+  if(e.mobile) fillMobile(e.mobile);
   setCountry(e.country||"UAE",e.city);
   $("qty").value=e.qty??""; $("unit").value=e.unit||""; $("sbill").value=e.sbill||"";
   if(e.photo) $("photoHint").innerHTML=`Current: <a href="${esc(e.photo)}" target="_blank" rel="noopener">view bill photo</a>. Choose a file only to replace it.`;
   $("date").value=e.date; $("account").value=e.account||"Bank"; $("from").value=e.from||"Bank"; $("to").value=e.to||"Cash";
-  $("ref").value=e.ref||""; $("note").value=e.note||"";
+  $("ref").value=e.ref||""; $("note").value=e.note||""; growNote();
   calcBill(); window.scrollTo(0,0);
 }
 $("cancelBtn").onclick=()=>{resetForm();showView("list")};
@@ -647,7 +667,7 @@ $("saveBtn").onclick=async()=>{
     ref:$("ref").value.trim(), note:$("note").value.trim(), updated:new Date().toISOString(),
     country:c.loc?country:(invE?.country||"UAE"), city:c.loc?cityVal():(invE?.city||""),
     sbill:c.sb?$("sbill").value.trim():"", photo:c.sb?(prev?.photo||""):"",
-    mobile:cat==="sale"&&$("mobile").value.replace(/\D/g,"")?$("mcc").value+$("mobile").value.replace(/\D/g,"").replace(/^0+/,""):"",
+    mobile:cat==="sale"?readMobile():"",
     items:cat==="sale"?JSON.stringify(its):"", inv:cat==="custpay"?$("inv").value:"", pdf:prev?.pdf||""
   };
   if(cat==="sale") e.bill=r2(bill);
@@ -731,7 +751,7 @@ function billHtml(i){
   <div style="height:3px;background:#F7B6CB;margin:16px 0 14px"></div>
   <div style="color:#8C7A6E;font-size:11px;letter-spacing:1px">BILL TO</div>
   <div style="font-size:15px;font-weight:bold;margin-top:2px">${esc(e.party)}</div>
-  ${e.mobile?`<div style="color:#6B5A4E">+${esc(e.mobile)}</div>`:""}
+  ${e.mobile?`<div style="color:#6B5A4E">${esc(fmtMobile(e.mobile))}</div>`:""}
   <table style="width:100%;border-collapse:collapse;margin-top:16px">
     <tr style="background:#FDE7EF"><th style="padding:8px;text-align:left;width:30px">#</th><th style="padding:8px;text-align:left">Item</th><th style="padding:8px;text-align:center;width:50px">Qty</th><th style="padding:8px;text-align:right;width:110px">Price</th><th style="padding:8px;text-align:right;width:120px">Amount</th></tr>
     ${rows}
@@ -768,12 +788,16 @@ function billText(e){
   return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}`;
 }
 function waLink(e,url){
-  return "https:\/\/wa.me/"+e.mobile+"?text="+encodeURIComponent(billText(e)+"\n\nView your bill: "+url);
+  return "https:\/\/wa.me/"+normMobile(e.mobile)+"?text="+encodeURIComponent(billText(e)+(url?"\n\nView your bill: "+url:""));
 }
 async function shareBill(id){
   const e=entries.find(x=>x.id===id), bl=billLinks[id]; if(!e||!bl||!bl.file) return;
-  try{ await navigator.share({files:[bl.file],text:billText(e)}); }
-  catch(err){ if(!err||err.name!=="AbortError") toast("Couldn't open sharing – use the link option instead"); }
+  let copied=false;
+  try{ if(navigator.clipboard){ await navigator.clipboard.writeText(billText(e)); copied=true; } }catch(x){}
+  if(copied) toast("Message copied — long-press Caption, then Paste");
+  try{
+    await navigator.share({files:[bl.file],text:billText(e)});
+  }catch(err){ if(!err||err.name!=="AbortError") toast("Couldn't open sharing – use the link option instead"); }
 }
 
 /* ---------- entries list ---------- */
@@ -795,7 +819,8 @@ function entryCard(e,inv){
   let box="";
   if(bl&&bl.busy) box=`<div class="billbox">Creating the bill…</div>`;
   else if(bl&&bl.url) box=`<div class="billbox">Bill ready.
-      ${bl.file?`<button type="button" class="btn wa" data-act="share" data-id="${esc(e.id)}">Share PDF on WhatsApp</button>`
+      ${bl.file?`<button type="button" class="btn wa" data-act="share" data-id="${esc(e.id)}">Send bill on WhatsApp</button>
+        <div class="hint" style="margin-top:6px">The message is copied for you.${e.mobile?" Choose "+esc(e.party)+" ("+esc(fmtMobile(e.mobile))+"),":" Choose the customer,"} then <b>long-press Caption → Paste</b> and send.</div>`
         :e.mobile?`<a class="btn wa" href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send on WhatsApp</a>`
         :`<div class="hint">Add a mobile number to this bill to send it on WhatsApp.</div>`}
       <div style="margin-top:8px"><a href="${esc(bl.url)}" target="_blank" rel="noopener">View PDF</a>${bl.file&&e.mobile?` · <a href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send as a link instead</a>`:""}</div></div>`;
@@ -983,7 +1008,7 @@ function buildReports(){
 
   const im=invoiceMap();
   out["Invoices"]=[["Invoice no","Date","Customer","Mobile","City","Items","Currency","Total","Paid","Balance due","Status","Invoice PDF"],
-    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.mobile?"'+"+i.e.mobile:"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
+    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.mobile?"'"+fmtMobile(i.e.mobile):"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
   out["Customer payments"]=[H.concat(["For invoice"]),...sorted.filter(e=>e.cat==="sale"||e.cat==="custpay").map(e=>row(e).concat([e.cat==="custpay"?e.inv||"":e.code||""]))];
   out["Suppliers"]=[H,...sorted.filter(e=>e.cat==="fabric"||e.cat==="lace").map(row)];
   out["Tailors"]=[H,...sorted.filter(e=>e.cat==="tailor").map(row)];
