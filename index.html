@@ -73,6 +73,13 @@ label.f > span{display:block;margin-bottom:5px}
 input,select,textarea{width:100%;border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:12px;font-size:16px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--plum);box-shadow:0 0 0 3px var(--plum-soft)}
 input[type=file]{padding:10px;font-size:14px}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;margin-bottom:8px}
+.ph{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:var(--bg)}
+.ph img{width:100%;height:100%;object-fit:cover;display:block}
+.ph-saved{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:12px;font-weight:600;color:var(--plum);text-decoration:none;text-align:center}
+.ph-x{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:16px;line-height:1;cursor:pointer}
+label.addline{display:block;text-align:center}
+.foot{text-align:center;font-size:12px;color:var(--muted);padding:6px 0 26px}
 textarea{min-height:104px;resize:vertical;line-height:1.45}
 .amount-row{display:grid;grid-template-columns:1fr 92px;gap:8px}
 .amount-row input{font-size:24px;font-weight:700;padding:12px 14px}
@@ -251,8 +258,10 @@ table.bd tr.sel td{font-weight:700}
 
     <div id="sbRow">
       <label class="f"><span>Supplier bill / invoice no.</span><input id="sbill" enterkeyhint="done" autocomplete="off" placeholder="Optional"></label>
-      <label class="f"><span>Bill photo</span><input id="photo" type="file" accept="image/*,application/pdf"></label>
-      <div class="hint" id="photoHint">Optional. Take a photo or pick one from your gallery. It's saved in your Google Drive.</div>
+      <span class="flabel">Bill photos</span>
+      <div id="photoList" class="photos hidden"></div>
+      <label class="addline">+ Add photos<input id="photo" type="file" accept="image/*,application/pdf" multiple style="display:none"></label>
+      <div class="hint" id="photoHint">Optional. Add one or more photos or screenshots. They're saved in your Google Drive.</div>
     </div>
 
     <div class="row2">
@@ -269,6 +278,7 @@ table.bd tr.sel td{font-weight:700}
     <label class="f"><span>Note</span><textarea id="note" rows="4" placeholder="Optional"></textarea></label>
 
     <button class="btn" id="saveBtn" type="button">Save entry</button>
+    <button class="btn ghost" id="clearBtn" type="button">Clear form</button>
     <button class="btn danger hidden" id="delBtn" type="button">Delete this entry</button>
     <button class="btn ghost hidden" id="cancelBtn" type="button">Cancel editing</button>
   </div>
@@ -358,6 +368,7 @@ table.bd tr.sel td{font-weight:700}
     <button class="btn danger" id="wipeBtn" type="button">Delete all entries</button>
   </div>
 </section>
+  <footer class="foot">© <span id="yr"></span> ZJ Ridas. All rights reserved.</footer>
 </main>
 
 <div class="toast" id="toast"></div>
@@ -452,7 +463,10 @@ async function load(quiet){
     settings=Object.assign({...DEF_SETTINGS},d.settings||{});
     sheetUrl=d.url||""; xlsxUrl=d.xlsx||""; $("sheetLink").href=sheetUrl||"#";
     mode="db"; setSync("Synced"); setBanner(""); fillSettings(); renderAll();
-    if(!editingId) setCat(cat,true);
+    if(!editingId){
+      if(!draftChecked){ draftChecked=true; if(restoreDraft()) toast("Draft restored – continue where you left off"); }
+      else setCat(cat,true);
+    }
   }catch(err){
     if(/LOCKED/.test(err.message)){ return showSetup("Too many wrong tries. Please wait 15 minutes and try again."); }
     if(/BAD_KEY/.test(err.message)){ try{localStorage.removeItem("zj_key")}catch(e){} KEY=""; return showSetup("This phone's key is no longer accepted. Please enter the key again."); }
@@ -520,7 +534,7 @@ function setCountry(k,city){
   onCity();
 }
 function onCity(){$("cityOtherRow").classList.toggle("hidden",$("city").value!=="Other")}
-$("countrySeg").onclick=ev=>{const b=ev.target.closest("button");if(b)setCountry(b.dataset.k)};
+$("countrySeg").onclick=ev=>{const b=ev.target.closest("button");if(!b)return;setCountry(b.dataset.k);if(cat!=="custpay"&&cat!=="transfer"){$("cur").value=b.dataset.k==="India"?"INR":"AED";calcBill();}};
 $("city").addEventListener("change",onCity);
 const cityVal=()=>$("city").value==="Other"?($("cityOther").value.trim()||"Other"):$("city").value;
 
@@ -564,11 +578,16 @@ function lastFor(name,role){
   const n=name.trim().toLowerCase(); if(!n) return null;
   return [...entries].filter(e=>(e.party||"").toLowerCase()===n&&CATS[e.cat]?.party===role).sort((a,b)=>String(b.updated).localeCompare(String(a.updated)))[0]||null;
 }
+let autoName="";
 function onParty(){
   const c=CATS[cat]; if(!c.party||editingId) { if(cat==="custpay") fillInvoices($("inv").value); return; }
+  const nm=$("party").value.trim().toLowerCase();
+  if(nm===autoName){ return; }
   const last=lastFor($("party").value,c.party);
   if(last){
+    autoName=nm;
     if(c.loc&&last.country) setCountry(last.country,last.city);
+    if(cat!=="custpay"&&cat!=="transfer"&&last.cur){ $("cur").value=eCur(last); calcBill(); }
     if(cat==="sale"&&last.mobile) fillMobile(last.mobile);
     if(cat==="sale"){ if(last.firm&&!$("firm").value) $("firm").value=last.firm; if(last.address&&!$("address").value) $("address").value=last.address; }
   }
@@ -578,6 +597,8 @@ function growNote(){const t=$("note");t.style.height="auto";t.style.height=Math.
 $("note").addEventListener("input",growNote);
 $("mobile").addEventListener("input",mobileHint); $("mcc").addEventListener("change",mobileHint);
 $("party").addEventListener("change",onParty); $("party").addEventListener("blur",onParty);
+$("party").addEventListener("input",()=>{const c=CATS[cat]; if(!c.party) return; const v=$("party").value.trim().toLowerCase();
+  if(v&&entries.some(e=>(e.party||"").toLowerCase()===v&&CATS[e.cat]?.party===c.party)) onParty();});
 
 function fillInvoices(keep){
   const name=$("party").value.trim().toLowerCase(), map=invoiceMap();
@@ -599,12 +620,12 @@ $("inv").addEventListener("change",()=>onInv(true));
 
 function resetForm(keepCat){
   ["amount","party","qty","ref","note","sbill","mobile","cityOther","firm","address"].forEach(i=>$(i).value=""); $("note").style.height="";
-  $("photo").value=""; $("photoHint").innerHTML="Optional. Take a photo or pick one from your gallery. It's saved in your Google Drive.";
+  $("photo").value=""; pendingPhotos=[]; keptPhotos=[]; renderPhotos(); autoName="";
   $("itemLines").innerHTML=""; $("mcc").value="971"; $("mobHint").textContent="";
   $("unit").value=""; $("date").value=today(); $("cur").value="AED";
   editingId=null; delArmed=false;
   $("formTitle").textContent="New entry"; $("saveBtn").textContent="Save entry";
-  $("delBtn").classList.add("hidden"); $("cancelBtn").classList.add("hidden"); $("delBtn").textContent="Delete this entry";
+  $("delBtn").classList.add("hidden"); $("cancelBtn").classList.add("hidden"); $("clearBtn").classList.remove("hidden"); $("delBtn").textContent="Delete this entry";
   setCountry("UAE");
   setCat(keepCat?cat:"sale");
   calcBill();
@@ -624,7 +645,7 @@ function editEntry(id){
   $("firm").value=e.firm||""; $("address").value=e.address||"";
   setCountry(e.country||"UAE",e.city);
   $("qty").value=e.qty??""; $("unit").value=e.unit||""; $("sbill").value=e.sbill||"";
-  if(e.photo) $("photoHint").innerHTML=`Current: <a href="${esc(e.photo)}" target="_blank" rel="noopener">view bill photo</a>. Choose a file only to replace it.`;
+  keptPhotos=photoUrls(e); renderPhotos(); $("clearBtn").classList.add("hidden");
   $("date").value=e.date; $("account").value=e.account||"Bank"; $("from").value=e.from||"Bank"; $("to").value=e.to||"Cash";
   $("ref").value=e.ref||""; $("note").value=e.note||""; growNote();
   calcBill(); window.scrollTo(0,0);
@@ -642,6 +663,74 @@ function compressImage(file){return new Promise((res,rej)=>{
   img.onerror=()=>rej(new Error("Couldn't read image")); img.src=u;
 })}
 function readRaw(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res({b64:String(r.result).split(",")[1],mime:file.type||"application/pdf",ext:"pdf"});r.onerror=rej;r.readAsDataURL(file)})}
+
+/* ---------- bill photos ---------- */
+let pendingPhotos=[], keptPhotos=[];
+function photoUrls(e){ return String(e.photo||"").split(/\n+/).map(x=>x.trim()).filter(Boolean); }
+function renderPhotos(){
+  const kept=keptPhotos.map((u,i)=>`<div class="ph"><a href="${esc(u)}" target="_blank" rel="noopener" class="ph-saved">Saved<br>photo ${i+1}</a><button type="button" class="ph-x" data-k="${i}" aria-label="Remove saved photo">×</button></div>`);
+  const pend=pendingPhotos.map((p,i)=>`<div class="ph">${String(p.mime).startsWith("image/")?`<img src="data:${p.mime};base64,${p.b64}" alt="Bill photo ${i+1}">`:`<span class="ph-saved">PDF</span>`}<button type="button" class="ph-x" data-p="${i}" aria-label="Remove photo">×</button></div>`);
+  $("photoList").innerHTML=kept.concat(pend).join("");
+  $("photoList").classList.toggle("hidden",!kept.length&&!pend.length);
+}
+$("photo").addEventListener("change",async()=>{
+  const files=[...$("photo").files]; $("photo").value="";
+  for(const f of files){ try{ pendingPhotos.push(String(f.type).startsWith("image/")?await compressImage(f):await readRaw(f)); }catch(x){ toast("Couldn't read one of the files"); } }
+  renderPhotos(); saveDraft();
+});
+$("photoList").addEventListener("click",ev=>{const x=ev.target.closest(".ph-x"); if(!x) return;
+  if(x.dataset.k!==undefined) keptPhotos.splice(+x.dataset.k,1); else pendingPhotos.splice(+x.dataset.p,1);
+  renderPhotos(); saveDraft();});
+
+/* ---------- draft (survives the app being closed) ---------- */
+const DRAFT_KEY="zj_draft"; let draftTimer=null, restoring=false, draftChecked=false;
+function draftData(){
+  return {cat, party:$("party").value, mcc:$("mcc").value, mobile:$("mobile").value, firm:$("firm").value, address:$("address").value,
+    inv:$("inv").value, country, city:$("city").value, cityOther:$("cityOther").value,
+    items:cat==="sale"?[...$("itemLines").children].map(r=>({d:r.querySelector(".d").value,q:r.querySelector(".q").value,p:r.querySelector(".p").value})):[],
+    amount:$("amount").value, cur:$("cur").value, qty:$("qty").value, unit:$("unit").value, sbill:$("sbill").value, date:$("date").value,
+    account:$("account").value, from:$("from").value, to:$("to").value, ref:$("ref").value, note:$("note").value, photos:pendingPhotos};
+}
+function draftHasContent(d){ return !!(d.party||d.amount||d.note||d.sbill||d.ref||d.firm||d.address||d.mobile||d.qty||(d.photos&&d.photos.length)||(d.items||[]).some(i=>i.d||i.p)); }
+function saveDraft(){
+  if(editingId||restoring||mode==="setup") return;
+  try{
+    localStorage.setItem("zj_lastcat",cat);
+    const d=draftData();
+    if(!draftHasContent(d)){ localStorage.removeItem(DRAFT_KEY); return; }
+    try{ localStorage.setItem(DRAFT_KEY,JSON.stringify(d)); }
+    catch(x){ d.photos=[]; localStorage.setItem(DRAFT_KEY,JSON.stringify(d)); if(!saveDraft.warned){ saveDraft.warned=true; toast("Photos are too large to keep if the app closes – save soon"); } }
+  }catch(x){}
+}
+function queueDraft(){ clearTimeout(draftTimer); draftTimer=setTimeout(saveDraft,250); }
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(x){} }
+function restoreDraft(){
+  let d=null, lc=null;
+  try{ d=JSON.parse(localStorage.getItem(DRAFT_KEY)||"null"); lc=localStorage.getItem("zj_lastcat"); }catch(x){}
+  if(!d||!CATS[d.cat]||!draftHasContent(d)){ if(lc&&CATS[lc]) setCat(lc); return false; }
+  restoring=true;
+  try{
+    resetForm(); setCat(d.cat);
+    $("party").value=d.party||""; $("firm").value=d.firm||""; $("address").value=d.address||"";
+    $("mcc").value=d.mcc||"971"; $("mobile").value=d.mobile||"";
+    setCountry(d.country||"UAE", d.city==="Other"?(d.cityOther||"Other"):d.city);
+    if(d.cat==="sale"){ $("itemLines").innerHTML=""; ((d.items&&d.items.length)?d.items:[{}]).forEach(it=>addLine(it)); }
+    $("cur").value=d.cur||"AED";
+    if(d.cat==="custpay") fillInvoices(d.inv||"");
+    $("amount").value=d.amount||""; $("qty").value=d.qty||""; $("unit").value=d.unit||""; $("sbill").value=d.sbill||"";
+    $("date").value=d.date||today(); $("account").value=d.account||"Bank"; $("from").value=d.from||"Bank"; $("to").value=d.to||"Cash";
+    $("ref").value=d.ref||""; $("note").value=d.note||"";
+    pendingPhotos=Array.isArray(d.photos)?d.photos:[]; renderPhotos();
+    autoName=(d.party||"").trim().toLowerCase();
+    growNote(); mobileHint(); calcBill();
+  }finally{ restoring=false; }
+  return true;
+}
+["input","change"].forEach(t=>$("v-add").addEventListener(t,queueDraft));
+$("v-add").addEventListener("click",ev=>{ if(ev.target.closest(".chip,#countrySeg button,#addLine,.x")) queueDraft(); });
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") saveDraft(); });
+window.addEventListener("pagehide",saveDraft);
+$("clearBtn").onclick=()=>{ resetForm(true); clearDraft(); saveDraft(); window.scrollTo(0,0); toast("Form cleared"); };
 
 function blurAll(){const a=document.activeElement;if(a&&a!==document.body&&a.blur)a.blur()}
 $("saveBtn").onclick=async()=>{
@@ -670,7 +759,7 @@ $("saveBtn").onclick=async()=>{
     account:cat==="transfer"?"":$("account").value, from:cat==="transfer"?$("from").value:"", to:cat==="transfer"?$("to").value:"",
     ref:$("ref").value.trim(), note:$("note").value.trim(), updated:new Date().toISOString(),
     country:c.loc?country:(invE?.country||"UAE"), city:c.loc?cityVal():(invE?.city||""),
-    sbill:c.sb?$("sbill").value.trim():"", photo:c.sb?(prev?.photo||""):"",
+    sbill:c.sb?$("sbill").value.trim():"", photo:"",
     mobile:cat==="sale"?readMobile():"",
     firm:cat==="sale"?$("firm").value.trim():"", address:cat==="sale"?$("address").value.trim():"",
     items:cat==="sale"?JSON.stringify(its):"", inv:cat==="custpay"?$("inv").value:"", pdf:prev?.pdf||""
@@ -679,16 +768,20 @@ $("saveBtn").onclick=async()=>{
   const was=editingId;
   btn.disabled=true;
   try{
-    const file=c.sb&&$("photo").files[0];
-    if(file){
-      btn.textContent="Uploading photo…";
-      const f=file.type.startsWith("image/")?await compressImage(file):await readRaw(file);
-      e.photo=await guarded(()=>call("uploadBill",f.b64,f.mime,`${e.date}_${(e.party||cat).replace(/[^\w-]+/g,"_")}.${f.ext}`));
+    if(c.sb){
+      const total=pendingPhotos.length; let n=0;
+      while(pendingPhotos.length){
+        n++; btn.textContent=`Uploading photo ${n} of ${total}…`;
+        const f=pendingPhotos[0];
+        const url=await guarded(()=>call("uploadBill",f.b64,f.mime,`${e.date}_${(e.party||cat).replace(/[^\w-]+/g,"_")}_${keptPhotos.length+1}.${f.ext}`));
+        keptPhotos.push(url); pendingPhotos.shift(); renderPhotos();
+      }
+      e.photo=keptPhotos.join("\n");
     }
     btn.textContent="Saving…";
     const code=await putEntry(e);
     toast((was?"Updated ":"Saved as ")+code);
-    resetForm(true); if(was) showView("list"); else window.scrollTo(0,0);
+    clearDraft(); resetForm(true); saveDraft(); if(was) showView("list"); else window.scrollTo(0,0);
   }catch(err){ toast("Couldn't save – check connection"); }
   btn.disabled=false; btn.textContent=editingId?"Update entry":"Save entry";
 };
@@ -780,6 +873,7 @@ function billHtml(i){
   <div style="margin-top:40px;text-align:center;color:#E8799F;font-size:20px;font-weight:bold">Thank you for your order</div>
   <div style="text-align:center;color:#4A3B33;font-size:14px;margin-top:8px">Know more about ZJ Ridas: ${lnk(SITE_URL,SITE_TXT)}</div>
   <div style="text-align:center;color:#4A3B33;font-size:14px;margin-top:4px">Instagram: ${lnk(IG_URL,"@zj.ridas")}</div>
+  <div style="text-align:center;color:#8C7A6E;font-size:11px;margin-top:16px">© ${new Date().getFullYear()} ZJ Ridas. All rights reserved.</div>
   </body></html>`;
 }
 async function sendBill(id){
@@ -842,7 +936,7 @@ function entryCard(e,inv){
       <div style="margin-top:8px"><a href="${esc(bl.url)}" target="_blank" rel="noopener">View PDF</a>${bl.file&&e.mobile?` · <a href="${esc(waLink(e,bl.url))}" target="_blank" rel="noopener">Send as a link instead</a>`:""}</div></div>`;
   return `<div class="entry">${e.code?`<div class="code">${esc(e.code)}</div>`:""}<div class="top"><div><div class="who">${esc(who)}${badge}</div><div class="what">${esc(bits)}</div></div>
     <div><div class="amt ${e.dir}">${sign}${amtTxt}</div>${sub}</div></div>
-    <div class="acts">${e.photo?`<a class="mini" href="${esc(e.photo)}" target="_blank" rel="noopener">Bill photo</a>`:""}
+    <div class="acts">${photoUrls(e).map((u,k,a)=>`<a class="mini" href="${esc(u)}" target="_blank" rel="noopener">${a.length>1?"Photo "+(k+1):"Bill photo"}</a>`).join("")}
     ${e.cat==="sale"?`<button type="button" class="mini" data-act="bill" data-id="${esc(e.id)}">Send bill</button>`:""}
     <button type="button" class="mini" data-act="edit" data-id="${esc(e.id)}">Edit</button>
     <button type="button" class="mini del" data-act="del" data-id="${esc(e.id)}">Delete</button></div>${box}</div>`;
@@ -997,7 +1091,7 @@ function buildReports(){
   const acc=e=>e.cat==="transfer"?`${e.from} → ${e.to}`:(e.account||"");
   const io=e=>e.dir==="in"?"In":e.dir==="out"?"Out":"Move";
   const H=["Code","Date","Type","In/Out","Name","Country","City","Account","Qty","Unit","Currency","Amount","Bill total","Supplier bill no","Bill photo","Ref","Note"];
-  const row=e=>[e.code||"",e.date,CATS[e.cat]?.label||e.cat,io(e),e.party||"",e.country||"",e.city||"",acc(e),e.qty||"",e.unit||"",eCur(e),r2(eAmt(e)),e.cat==="sale"?r2(eBill(e)):"",e.sbill?"'"+e.sbill:"",e.photo||"",e.ref||"",e.note||""];
+  const row=e=>[e.code||"",e.date,CATS[e.cat]?.label||e.cat,io(e),e.party||"",e.country||"",e.city||"",acc(e),e.qty||"",e.unit||"",eCur(e),r2(eAmt(e)),e.cat==="sale"?r2(eBill(e)):"",e.sbill?"'"+e.sbill:"",photoUrls(e).join(" , "),e.ref||"",e.note||""];
 
   const S=[["ZJ Ridas — business summary"],["Updated",new Date().toLocaleString("en-GB")],["Rate used","1 AED = "+rate+" INR"],[],["","AED","INR"]];
   const fA=flows(entries,"AED"),fI=flows(entries,"INR"),pA=pl(entries,"AED"),pI=pl(entries,"INR"),bA=balances("AED"),bI=balances("INR");
@@ -1066,6 +1160,7 @@ document.addEventListener("keydown",ev=>{
   if(t.id==="keyIn") return $("keyBtn").click();
   t.blur();
 });
+$("yr").textContent=new Date().getFullYear();
 buildChips(); resetForm(); fillSettings(); init();
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{})); }
 </script>
