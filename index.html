@@ -92,6 +92,9 @@ textarea{min-height:104px;resize:vertical;line-height:1.45}
 .items .x{border:1px solid var(--line);background:transparent;border-radius:10px;cursor:pointer;color:var(--out);font-size:18px}
 .items .hd{display:grid;grid-template-columns:1fr 56px 90px 36px;gap:6px;font-size:12px;color:var(--muted);margin-bottom:4px}
 .addline{border:1px dashed var(--line);background:transparent;border-radius:10px;padding:9px;width:100%;cursor:pointer;color:var(--plum);font-weight:600}
+.billsub{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:15px}
+.discrow{display:grid;grid-template-columns:1fr 110px 80px;gap:8px;align-items:center;margin-top:8px;font-size:15px}
+.discrow input,.discrow select{padding:10px}
 .billtotal{display:flex;justify-content:space-between;font-weight:700;font-size:17px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
 
 .btn{display:block;width:100%;border:0;border-radius:14px;padding:14px;font-weight:700;font-size:16px;cursor:pointer;margin-top:18px;background:var(--plum);color:var(--btn-ink);text-align:center;text-decoration:none}
@@ -242,6 +245,8 @@ table.bd tr.sel td{font-weight:700}
         <div id="itemLines"></div>
         <button type="button" class="addline" id="addLine">+ Add item</button>
       </div>
+      <div class="billsub"><span>Items total</span><span id="subTotal">0</span></div>
+      <div class="discrow"><span>Discount</span><input id="disc" inputmode="decimal" enterkeyhint="done" placeholder="0" aria-label="Discount"><select id="discType" aria-label="Discount type"><option value="amt">AED</option><option value="pct">%</option></select></div>
       <div class="billtotal"><span>Bill total</span><span id="billTotal">0</span></div>
     </div>
 
@@ -421,6 +426,7 @@ const R=()=>num(settings.inrPerAed)||1;
 function conv(n,from,to){ if(from===to) return n; return from==="AED"? n*R() : n/R(); }
 const eCur=e=>e.cur==="INR"?"INR":"AED";
 const eAmt=e=>num(e.amount);
+const eDisc=e=>num(e.discount);
 const eBill=e=>num(e.bill??e.amount);
 const v=(e,to=D)=>conv(eAmt(e),eCur(e),to);
 const vb=(e,to=D)=>conv(eBill(e),eCur(e),to);
@@ -570,7 +576,16 @@ $("addLine").onclick=()=>addLine();
 $("itemLines").addEventListener("input",calcBill);
 $("itemLines").addEventListener("click",ev=>{const x=ev.target.closest(".x");if(x){x.parentElement.remove();if(!$("itemLines").children.length)addLine();calcBill()}});
 function readItems(){return [...$("itemLines").children].map(r=>({d:r.querySelector(".d").value.trim(),q:num(r.querySelector(".q").value),p:num(r.querySelector(".p").value)})).filter(i=>i.d||i.p)}
-function calcBill(){const t=readItems().reduce((a,i)=>a+i.q*i.p,0);$("billTotal").textContent=fmt(t,$("cur").value);return r2(t)}
+function subTotal(){ return r2(readItems().reduce((a,i)=>a+i.q*i.p,0)); }
+function discAmt(){ const sub=subTotal(), v=num($("disc").value); const d=$("discType").value==="pct"?sub*v/100:v; return r2(Math.min(Math.max(d,0),sub)); }
+function calcBill(){
+  const C=$("cur").value, sub=subTotal(), d=discAmt();
+  $("discType").options[0].textContent=C==="INR"?"₹":"AED";
+  $("subTotal").textContent=fmt(sub,C);
+  $("billTotal").textContent=fmt(sub-d,C)+(d>0?" (−"+fmt(d,C)+")":"");
+  return r2(sub-d);
+}
+$("disc").addEventListener("input",calcBill); $("discType").addEventListener("change",calcBill);
 $("cur").addEventListener("change",calcBill);
 
 /* auto-fill from past entries */
@@ -619,7 +634,7 @@ function onInv(setAmount){
 $("inv").addEventListener("change",()=>onInv(true));
 
 function resetForm(keepCat){
-  ["amount","party","qty","ref","note","sbill","mobile","cityOther","firm","address"].forEach(i=>$(i).value=""); $("note").style.height="";
+  ["amount","party","qty","ref","note","sbill","mobile","cityOther","firm","address","disc"].forEach(i=>$(i).value=""); $("discType").value="amt"; $("note").style.height="";
   $("photo").value=""; pendingPhotos=[]; keptPhotos=[]; renderPhotos(); autoName="";
   $("itemLines").innerHTML=""; $("mcc").value="971"; $("mobHint").textContent="";
   $("unit").value=""; $("date").value=today(); $("cur").value="AED";
@@ -638,7 +653,7 @@ function editEntry(id){
   setCat(e.cat);
   $("formTitle").textContent="Edit "+(e.code||"entry"); $("saveBtn").textContent="Update entry";
   $("delBtn").classList.remove("hidden"); $("cancelBtn").classList.remove("hidden");
-  if(e.cat==="sale"){ $("itemLines").innerHTML=""; const its=items(e); if(its.length) its.forEach(addLine); else addLine({d:"Order",q:1,p:eBill(e)}); }
+  if(e.cat==="sale"){ $("itemLines").innerHTML=""; const its=items(e); if(its.length) its.forEach(addLine); else addLine({d:"Order",q:1,p:eBill(e)+eDisc(e)}); $("disc").value=eDisc(e)||""; $("discType").value="amt"; }
   if(e.cat==="custpay") fillInvoices(e.inv||"");
   $("cur").value=eCur(e); $("amount").value=r2(eAmt(e));
   if(e.mobile) fillMobile(e.mobile);
@@ -688,10 +703,10 @@ function draftData(){
   return {cat, party:$("party").value, mcc:$("mcc").value, mobile:$("mobile").value, firm:$("firm").value, address:$("address").value,
     inv:$("inv").value, country, city:$("city").value, cityOther:$("cityOther").value,
     items:cat==="sale"?[...$("itemLines").children].map(r=>({d:r.querySelector(".d").value,q:r.querySelector(".q").value,p:r.querySelector(".p").value})):[],
-    amount:$("amount").value, cur:$("cur").value, qty:$("qty").value, unit:$("unit").value, sbill:$("sbill").value, date:$("date").value,
+    disc:$("disc").value, discType:$("discType").value, amount:$("amount").value, cur:$("cur").value, qty:$("qty").value, unit:$("unit").value, sbill:$("sbill").value, date:$("date").value,
     account:$("account").value, from:$("from").value, to:$("to").value, ref:$("ref").value, note:$("note").value, photos:pendingPhotos};
 }
-function draftHasContent(d){ return !!(d.party||d.amount||d.note||d.sbill||d.ref||d.firm||d.address||d.mobile||d.qty||(d.photos&&d.photos.length)||(d.items||[]).some(i=>i.d||i.p)); }
+function draftHasContent(d){ return !!(d.party||d.amount||d.disc||d.note||d.sbill||d.ref||d.firm||d.address||d.mobile||d.qty||(d.photos&&d.photos.length)||(d.items||[]).some(i=>i.d||i.p)); }
 function saveDraft(){
   if(editingId||restoring||mode==="setup") return;
   try{
@@ -714,7 +729,7 @@ function restoreDraft(){
     $("party").value=d.party||""; $("firm").value=d.firm||""; $("address").value=d.address||"";
     $("mcc").value=d.mcc||"971"; $("mobile").value=d.mobile||"";
     setCountry(d.country||"UAE", d.city==="Other"?(d.cityOther||"Other"):d.city);
-    if(d.cat==="sale"){ $("itemLines").innerHTML=""; ((d.items&&d.items.length)?d.items:[{}]).forEach(it=>addLine(it)); }
+    if(d.cat==="sale"){ $("itemLines").innerHTML=""; ((d.items&&d.items.length)?d.items:[{}]).forEach(it=>addLine(it)); $("disc").value=d.disc||""; $("discType").value=d.discType==="pct"?"pct":"amt"; }
     $("cur").value=d.cur||"AED";
     if(d.cat==="custpay") fillInvoices(d.inv||"");
     $("amount").value=d.amount||""; $("qty").value=d.qty||""; $("unit").value=d.unit||""; $("sbill").value=d.sbill||"";
@@ -741,7 +756,8 @@ $("saveBtn").onclick=async()=>{
   const bill=cat==="sale"?calcBill():null;
   if(cat==="sale"){
     if(!$("party").value.trim()) return toast("Add the customer name");
-    if(!its.length||bill<=0) return toast("Add at least one item with a price");
+    if(!its.length||subTotal()<=0) return toast("Add at least one item with a price");
+    if(bill<=0) return toast("The discount can't be the full amount");
     if(amount>bill) return toast("Received can't be more than the bill");
   } else if(amount<=0) return toast("Enter an amount");
   if(c.party&&!$("party").value.trim()&&["custpay","fabric","lace","tailor"].includes(cat)) return toast(`Add the ${c.party.toLowerCase()} name`);
@@ -764,7 +780,7 @@ $("saveBtn").onclick=async()=>{
     firm:cat==="sale"?$("firm").value.trim():"", address:cat==="sale"?$("address").value.trim():"",
     items:cat==="sale"?JSON.stringify(its):"", inv:cat==="custpay"?$("inv").value:"", pdf:prev?.pdf||""
   };
-  if(cat==="sale") e.bill=r2(bill);
+  if(cat==="sale"){ e.bill=r2(bill); e.discount=discAmt()||""; } else e.discount="";
   const was=editingId;
   btn.disabled=true;
   try{
@@ -832,7 +848,7 @@ const months=()=>[...new Set(entries.map(e=>e.date.slice(0,7)))].sort().reverse(
 /* ---------- bill (PDF) ---------- */
 const SITE_URL="https:\/\/zj-ridas.vercel.app\/", SITE_TXT="zj-ridas.vercel.app", IG_URL="https:\/\/www.instagram.com\/zj.ridas\/";
 function billHtml(i){
-  const e=i.e, C=eCur(e), its=items(e).length?items(e):[{d:"Order",q:1,p:eBill(e)}];
+  const e=i.e, C=eCur(e), its=items(e).length?items(e):[{d:"Order",q:1,p:eBill(e)+eDisc(e)}];
   const money=n=>fmt(n,C).replace("₹","Rs.");
   const lnk=(u,t,c)=>`<a href="${u}" style="color:${c||"#D9668F"};text-decoration:none;font-weight:bold">${t}</a>`;
   const td="padding:8px;border-bottom:1px solid #F3D9E3";
@@ -862,6 +878,8 @@ function billHtml(i){
     ${rows}
   </table>
   <table style="width:300px;margin-left:auto;margin-top:12px;border-collapse:collapse;font-size:14px">
+    ${eDisc(e)>0?`<tr><td style="padding:6px 8px">Subtotal</td><td style="padding:6px 8px;text-align:right">${money(i.bill+eDisc(e))}</td></tr>
+    <tr><td style="padding:6px 8px;color:#C2507A">Discount</td><td style="padding:6px 8px;text-align:right;color:#C2507A">− ${money(eDisc(e))}</td></tr>`:""}
     <tr><td style="padding:6px 8px">Total</td><td style="padding:6px 8px;text-align:right;font-weight:bold">${money(i.bill)}</td></tr>
     <tr><td style="padding:6px 8px">Paid</td><td style="padding:6px 8px;text-align:right">${money(i.paid)}</td></tr>
     <tr style="background:#E3F5F3"><td style="padding:8px;font-weight:bold;border-top:2px solid #8ED3CC;border-bottom:2px solid #8ED3CC;color:#2F7F77">Balance due</td><td style="padding:8px;text-align:right;font-weight:bold;font-size:15px;border-top:2px solid #8ED3CC;border-bottom:2px solid #8ED3CC;color:#2F7F77">${money(Math.max(0,i.due))}</td></tr>
@@ -895,7 +913,7 @@ async function sendBill(id){
 }
 function billText(e){
   const i=invoiceMap()[e.code||e.id], C=eCur(e);
-  return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}\n\nKnow more about ZJ Ridas: ${SITE_TXT}`;
+  return `Hi ${e.party}, thank you for your order with ZJ Ridas.\nBill ${i.code}\nTotal: ${fmt(i.bill,C)}${eDisc(e)>0?" (after "+fmt(eDisc(e),C)+" discount)":""}\nPaid: ${fmt(i.paid,C)}\nBalance due: ${fmt(Math.max(0,i.due),C)}\n\nKnow more about ZJ Ridas: ${SITE_TXT}`;
 }
 function waLink(e,url){
   return "https:\/\/wa.me/"+normMobile(e.mobile)+"?text="+encodeURIComponent(billText(e)+(url?"\n\nView your bill: "+url:""));
@@ -1117,8 +1135,8 @@ function buildReports(){
   out["By period"]=BP;
 
   const im=invoiceMap();
-  out["Invoices"]=[["Invoice no","Date","Customer","Firm","Address","Mobile","City","Items","Currency","Total","Paid","Balance due","Status","Invoice PDF"],
-    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.firm||"",i.e.address||"",i.e.mobile?"'"+fmtMobile(i.e.mobile):"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
+  out["Invoices"]=[["Invoice no","Date","Customer","Firm","Address","Mobile","City","Items","Currency","Subtotal","Discount","Total","Paid","Balance due","Status","Invoice PDF"],
+    ...Object.values(im).sort((a,b)=>a.e.date.localeCompare(b.e.date)).map(i=>[i.code,i.e.date,i.e.party||"",i.e.firm||"",i.e.address||"",i.e.mobile?"'"+fmtMobile(i.e.mobile):"",i.e.city||"",items(i.e).map(t=>`${t.q} x ${t.d} @ ${t.p}`).join("; "),eCur(i.e),r2(i.bill+eDisc(i.e)),eDisc(i.e)?r2(eDisc(i.e)):"",r2(i.bill),r2(i.paid),r2(Math.max(0,i.due)),i.status,i.e.pdf||""])];
   out["Customer payments"]=[H.concat(["For invoice"]),...sorted.filter(e=>e.cat==="sale"||e.cat==="custpay").map(e=>row(e).concat([e.cat==="custpay"?e.inv||"":e.code||""]))];
   out["Suppliers"]=[H,...sorted.filter(e=>e.cat==="fabric"||e.cat==="lace").map(row)];
   out["Tailors"]=[H,...sorted.filter(e=>e.cat==="tailor").map(row)];
