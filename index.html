@@ -92,6 +92,14 @@ textarea{min-height:104px;resize:vertical;line-height:1.45}
 .items .x{border:1px solid var(--line);background:transparent;border-radius:10px;cursor:pointer;color:var(--out);font-size:18px}
 .items .hd{display:grid;grid-template-columns:1fr 56px 90px 36px;gap:6px;font-size:12px;color:var(--muted);margin-bottom:4px}
 .addline{border:1px dashed var(--line);background:transparent;border-radius:10px;padding:9px;width:100%;cursor:pointer;color:var(--plum);font-weight:600}
+.curtbl{width:100%;border-collapse:collapse;font-size:14px}
+.curtbl th{font-size:12px;color:var(--muted);font-weight:600;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
+.curtbl th:first-child,.curtbl td:first-child{text-align:left}
+.curtbl td{text-align:right;padding:8px 6px;border-bottom:1px dashed var(--line);white-space:nowrap}
+.curtbl tr.net td{font-weight:700;border-bottom:0;border-top:1px solid var(--ink)}
+.curtbl tr.sub td{font-size:13px;color:var(--muted);padding:5px 6px}
+.curtbl tr.grp td{font-size:12px;font-weight:700;color:var(--plum);padding-top:12px;border-bottom:0}
+.linkbtn{border:0;background:none;color:var(--plum);font-weight:600;padding:8px 0 0;cursor:pointer;font-size:14px}
 .billsub{display:flex;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:15px}
 .discrow{display:grid;grid-template-columns:1fr 110px 80px;gap:8px;align-items:center;margin-top:8px;font-size:15px}
 .discrow input,.discrow select{padding:10px}
@@ -300,6 +308,7 @@ table.bd tr.sel td{font-weight:700}
       <option value="supplier">Suppliers</option><option value="tailor">Tailors</option>
       <option value="bank">Bank only</option><option value="cash">Cash only</option>
       <option value="UAE">UAE</option><option value="India">India</option>
+      <option value="curAED">Paid in AED</option><option value="curINR">Paid in INR</option>
     </select>
     <input id="fSearch" type="search" enterkeyhint="search" placeholder="Search code, name, bill no, city, note">
   </div>
@@ -320,6 +329,11 @@ table.bd tr.sel td{font-weight:700}
   <div class="pnav" id="pnav"><button type="button" id="prevP" aria-label="Previous period">‹</button><div class="lbl" id="pLabel"></div><button type="button" id="nextP" aria-label="Next period">›</button></div>
   <div class="stats" id="sFlow"></div>
   <div class="hint" id="rateNote" style="margin:8px 2px 14px"></div>
+  <div class="panel"><h3>By currency (as paid)</h3>
+    <div class="tablewrap"><table class="curtbl" id="curTbl"></table></div>
+    <button type="button" class="linkbtn" id="curMore">Show by category ▾</button>
+    <div class="tablewrap hidden" id="curCatWrap"><table class="curtbl" id="curCat"></table></div>
+  </div>
 
   <div class="panel"><h3 id="chartTitle">Trend</h3><div class="chart" id="chart"></div>
     <div class="legend"><span><i style="background:var(--in)"></i>Money in</span><span><i style="background:var(--out)"></i>Money out</span></div></div>
@@ -971,11 +985,12 @@ function renderList(){
   if(t==="tailor") l=l.filter(e=>e.cat==="tailor");
   if(t==="bank"||t==="cash"){const a=t==="bank"?"Bank":"Cash";l=l.filter(e=>e.account===a||e.from===a||e.to===a)}
   if(t==="UAE"||t==="India") l=l.filter(e=>(e.country||"UAE")===t);
+  if(t==="curAED"||t==="curINR") l=l.filter(e=>eCur(e)===t.slice(3));
   if(q) l=l.filter(e=>[e.code,e.party,e.note,e.ref,e.sbill,e.city,e.mobile,e.inv,CATS[e.cat]?.label,items(e).map(i=>i.d).join(" ")].join(" ").toLowerCase().includes(q));
   l=[...l].sort((a,b)=>b.date.localeCompare(a.date)||String(b.updated).localeCompare(String(a.updated)));
-  const f=flows(l);
-  $("listTotals").innerHTML=`<div class="stat"><div class="k">In (${D})</div><div class="v amt in">${fmt(f.inn,D)}</div></div>
-    <div class="stat"><div class="k">Out (${D})</div><div class="v amt out">${fmt(f.out,D)}</div></div>
+  const LC=(t==="curAED"||t==="curINR")?t.slice(3):D, f=flows(l,LC);
+  $("listTotals").innerHTML=`<div class="stat"><div class="k">In (${LC})</div><div class="v amt in">${fmt(f.inn,LC)}</div></div>
+    <div class="stat"><div class="k">Out (${LC})</div><div class="v amt out">${fmt(f.out,LC)}</div></div>
     <div class="stat"><div class="k">Entries</div><div class="v">${l.length}</div></div>`;
   if(!l.length){$("list").innerHTML=`<div class="empty">${entries.length?"Nothing matches these filters.":"No entries yet. Tap Add to log your first one."}</div>`;return}
   let html="",last="";
@@ -1014,6 +1029,7 @@ function renderSummary(){
     <div class="stat"><div class="k">Money out</div><div class="v amt out">${fmt(f.out,D)}</div></div>
     <div class="stat"><div class="k">Net</div><div class="v">${fmt(f.net,D)}</div></div>`;
   $("rateNote").textContent=`Totals combine AED and INR entries at 1 AED = ${R()} INR. Change it in Settings.`;
+  renderByCurrency(l);
 
   const end=g==="all"?pkey(today(),"year"):dash.key; const n=chartG==="year"?5:8; const keys=[];
   for(let i=n-1;i>=0;i--) keys.push(pshift(end,chartG,-i));
@@ -1050,6 +1066,22 @@ function renderSummary(){
   $("sInv").innerHTML=line("Owner investment",fmt(cap,D))+line("Owner withdrawals",fmt(-draw,D))+line("Net invested",fmt(cap-draw,D),"total")+line("Spent on setup",fmt(setup,D));
 }
 $("gSeg").onclick=ev=>{const b=ev.target.closest("button");if(!b)return;dash.g=b.dataset.g;dash.key=pkey(today(),dash.g==="all"?"year":dash.g);renderSummary()};
+function renderByCurrency(l){
+  const nat=(c,dir,f)=>sum(l.filter(e=>e.dir===dir&&eCur(e)===c&&(!f||f(e))),e=>eAmt(e));
+  const n=(x,c)=>x?fmt(x,c):"–";
+  const inA=nat("AED","in"), inI=nat("INR","in"), outA=nat("AED","out"), outI=nat("INR","out");
+  const sg=(x,c)=>x===0?"–":(x>0?"+":"−")+fmt(Math.abs(x),c);
+  $("curTbl").innerHTML=`<tr><th></th><th>AED</th><th>INR</th></tr>
+    <tr><td>Money out</td><td class="amt out">${n(outA,"AED")}</td><td class="amt out">${n(outI,"INR")}</td></tr>
+    <tr><td>Money in</td><td class="amt in">${n(inA,"AED")}</td><td class="amt in">${n(inI,"INR")}</td></tr>
+    <tr class="net"><td>Net</td><td>${sg(inA-outA,"AED")}</td><td>${sg(inI-outI,"INR")}</td></tr>`;
+  const rows=dir=>Object.keys(CATS).filter(k=>CATS[k].dir===dir).map(k=>({k,a:nat("AED",dir,e=>e.cat===k),i:nat("INR",dir,e=>e.cat===k)})).filter(r=>r.a||r.i)
+    .sort((x,y)=>(conv(y.a,"AED","INR")+y.i)-(conv(x.a,"AED","INR")+x.i))
+    .map(r=>`<tr class="sub"><td>${esc(CATS[r.k].label)}</td><td>${n(r.a,"AED")}</td><td>${n(r.i,"INR")}</td></tr>`).join("");
+  const o=rows("out"), i=rows("in");
+  $("curCat").innerHTML=(o?`<tr class="grp"><td colspan="3">Money out</td></tr>${o}`:"")+(i?`<tr class="grp"><td colspan="3">Money in</td></tr>${i}`:"")||`<tr><td style="color:var(--muted)">Nothing in this period.</td></tr>`;
+}
+$("curMore").onclick=()=>{const w=$("curCatWrap"), open=w.classList.toggle("hidden")===false; $("curMore").textContent=open?"Hide categories ▴":"Show by category ▾";};
 $("dSeg").onclick=ev=>{const b=ev.target.closest("button");if(!b)return;D=b.dataset.c;try{localStorage.setItem("zj_display",D)}catch(e){}renderAll()};
 $("prevP").onclick=()=>{dash.key=pshift(dash.key,dash.g,-1);renderSummary()};
 $("nextP").onclick=()=>{dash.key=pshift(dash.key,dash.g,1);renderSummary()};
