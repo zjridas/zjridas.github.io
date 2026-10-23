@@ -1,4 +1,4 @@
-const CACHE = "zj-ridas-v1";
+const CACHE = "zj-ridas-v2";
 const FILES = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {
   self.skipWaiting();
